@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 const MEMORY_SIZE: usize = 1 << 20; // 1 MB
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ExitReason {
     ProgramExhausted,
     Ecall,
@@ -448,6 +448,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     #[test]
     fn sign_extension() {
@@ -466,5 +467,52 @@ mod tests {
             | 0x63; // opcode with rs/rd/funct3 set to zero for simplicity
         let imm = decode_b_imm(instr);
         assert_eq!(imm, -4);
+    }
+
+    fn task_path(dir: &str, name: &str, ext: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../tests")
+            .join(dir)
+            .join(format!("{name}.{ext}"))
+    }
+
+    fn run_program(bin: &PathBuf) -> [u32; 32] {
+        let program = std::fs::read(bin).expect("failed to read test binary");
+        let mut simulator = Simulator::new(program, false);
+        let exit = simulator.run().expect("simulation failed");
+        assert_eq!(exit, ExitReason::Ecall, "program did not terminate via ecall");
+        simulator.cpu.regs
+    }
+
+    fn load_expected(res: &PathBuf) -> [u32; 32] {
+        let data = std::fs::read(res).expect("failed to read reference dump");
+        assert_eq!(data.len(), 32 * 4, "unexpected register dump length");
+
+        let mut regs = [0u32; 32];
+        for (i, chunk) in data.chunks_exact(4).enumerate() {
+            regs[i] = u32::from_le_bytes(chunk.try_into().unwrap());
+        }
+        regs
+    }
+
+    fn check_task(dir: &str, cases: &[&str]) {
+        for case in cases {
+            let bin = task_path(dir, case, "bin");
+            let res = task_path(dir, case, "res");
+            let regs = run_program(&bin);
+            let expected = load_expected(&res);
+            assert_eq!(regs, expected, "Mismatch in {dir}/{case}");
+        }
+    }
+
+    #[test]
+    fn lecturer_task_assembly_programs_match_reference_outputs() {
+        check_task("task1", &["addlarge", "addneg", "addpos", "bool", "set", "shift", "shift2"]);
+        check_task("task2", &["branchcnt", "branchmany", "branchtrap"]);
+        check_task("task3", &["loop", "recursive", "string", "width"]);
+        check_task(
+            "task4",
+            &["t1", "t2", "t3", "t4", "t5", "t6", "t7", "t8", "t9", "t10", "t11", "t12", "t13", "t14", "t15"],
+        );
     }
 }
